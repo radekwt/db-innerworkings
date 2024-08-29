@@ -1,0 +1,223 @@
+#include "Buffer.h"
+#include <iostream>
+#include <sstream>
+
+Buffer::Buffer()
+{
+}
+
+void Buffer::nullTerminateTheBuffer(int index)
+{
+    buffer[index] = '\0';
+}
+void Buffer::fillBuffer(char content[],int size)
+{
+    for (int i = 0; i < BUFFER_SIZE; i++) {
+        this->buffer[i] = content[i];
+    }
+}
+void Buffer::recordListToFile2(std::string filename)
+{
+    std::ofstream outputFile(filename, std::ios::app);
+    if (outputFile.is_open()) {
+        auto iter = recordVector.begin(); // Iterator for removing elements
+
+        while (iter != recordVector.end()) {
+            const Record& record = *iter;
+            outputFile << record.recordToFileString();
+            iter = recordVector.erase(iter); // Erase the written record from vector
+        }
+        outputFile.close();
+    }
+    else {
+        std::cerr << "Failed to open " << filename << " for writing." << std::endl;
+    }
+}
+void Buffer::recordListToFile(std::string filename)
+{
+    std::ofstream outputFile(filename, std::ios::app);
+    if (outputFile.is_open()) {
+        auto iter = recordVector.begin(); // Iterator for removing elements
+
+        while (iter != recordVector.end()) {
+            const Record& record = *iter;
+            if (this->lastAvg > record.getGradeAvg()) {
+                this->lastAvg = -1.0;
+                break;
+            }
+            outputFile << record.recordToFileString();
+            this->lastAvg = record.getGradeAvg();
+            iter = recordVector.erase(iter); // Erase the written record from vector
+        }
+
+        outputFile.close();
+    }
+    else {
+        std::cerr << "Failed to open " << filename << " for writing." << std::endl;
+    }
+}
+std::vector<Record> Buffer::recordListToFile()
+{
+    auto iter = recordVector.begin(); // Iterator for removing elements
+    std::vector<Record> newVector;
+    while (iter != recordVector.end()) {
+        const Record& record = *iter;
+        if (this->lastAvg > record.getGradeAvg()) {
+            this->lastAvg = -1.0;
+            break;
+        }
+        newVector.push_back(record); // Add the record to the new vector
+        this->lastAvg = record.getGradeAvg();
+        iter = recordVector.erase(iter); // Erase the record from the original vector
+    }
+    return newVector;
+}
+bool Buffer::checkIfSorted() {
+    auto iter = recordVector.begin();
+    while (iter != recordVector.end()) {
+        const Record& record = *iter;
+        if (this->lastAvg > record.getGradeAvg()) {
+            return false;
+        }
+        this->lastAvg = record.getGradeAvg();
+        ++iter;
+    }
+    return true;
+}
+void Buffer::recordListToFile(std::string filename,Buffer* buffer1,Buffer* buffer2)
+{
+    std::ofstream outputFile(filename, std::ios::app);
+
+    if (outputFile.is_open()) {
+        auto iterTape1 = buffer1->recordVector.begin(); // Iterator for removing elements
+        auto iterTape2 = buffer2->recordVector.begin(); // Iterator for removing elements
+
+        while (iterTape1 != buffer1->recordVector.end() && iterTape2 != buffer2->recordVector.end()) {
+            const Record& recordTape1 = *iterTape1;
+            const Record& recordTape2 = *iterTape2;
+            if (recordTape1.getGradeAvg() < recordTape2.getGradeAvg() && buffer1->lastAvg <= recordTape1.getGradeAvg()) {
+                outputFile << recordTape1.recordToFileString();
+                buffer1->lastAvg = recordTape1.getGradeAvg();
+                iterTape1 = buffer1->recordVector.erase(iterTape1);
+                buffer2->lastAvg = -1;
+            }
+            else {
+                outputFile << recordTape2.recordToFileString();
+                buffer2->lastAvg = recordTape2.getGradeAvg();
+                iterTape2 = buffer2->recordVector.erase(iterTape2);
+                buffer1->lastAvg = -1;
+            }
+        }
+
+        outputFile.close();
+    }
+    else {
+        std::cerr << "Failed to open " << filename << " for writing." << std::endl;
+    }
+}
+
+
+
+
+int Buffer::readRecords() {
+    this->recordVector.clear();
+    this->printBuffer();
+    std::istringstream bufferStream(buffer);
+    std::string recordString;
+    int currentEndRecCharIndex = -1;  
+    int position = 0;
+    int recNum = 0;
+    for (int i = 0; buffer[i] != '\0'; i++) {
+        if (buffer[i] == endRecChar) {
+            position = i;
+            recNum += 1;
+        }
+    }
+    std::getline(bufferStream, recordString, endRecChar);
+    for (int i = 0; i < recNum; i++) {
+        std::istringstream recordStream(recordString);
+        int studentId;
+        short int grade1, grade2, grade3;
+
+        if (recordStream >> studentId >> grade1 >> grade2 >> grade3) {
+            Record record(studentId, grade1, grade2, grade3); 
+            recordVector.push_back(record);
+
+        }
+    }
+    lastEndRecCharIndex = position;
+    std::cout << lastEndRecCharIndex<<std::endl;
+    return lastEndRecCharIndex;
+}
+
+std::streampos Buffer::readRecordsFormated() {
+    this->recordVector.clear();
+    std::istringstream bufferStream(buffer);
+    std::string recordString;
+    int index = 0;
+    int studentId;
+    short int grade1, grade2, grade3;
+    char recordBuffer[RECORD_SIZE_IN_FILE + 1];
+    while (bufferStream.read(recordBuffer, sizeof(recordBuffer) - 1)) {
+        recordBuffer[sizeof(recordBuffer) - 1] = '\0';
+        if (sscanf(recordBuffer, "%10d%3hd%3hd%3hd", &studentId, &grade1, &grade2, &grade3)==4) {
+            Record record(studentId, grade1, grade2, grade3);
+            this->recordVector.push_back(record);
+            index++;
+        }
+        else {
+            break;
+        }
+    }
+
+    return index * RECORD_SIZE_IN_FILE;
+}
+
+std::string Buffer::recordListToString() const{
+    std::string result;
+
+    for (const auto& record : recordVector) {
+        result += record.recordToFileString() + '\n';
+    }
+
+    return result;
+}
+
+void Buffer::printBuffer() const
+{
+    for (int i = 0; i < BUFFER_SIZE; i++) {
+        std::cout << this->buffer[i];
+    }
+    std::cout << std::endl;
+}
+
+// Add getter for the recordList if needed
+std::vector<Record> Buffer::getRecordVector() const {
+    return this->recordVector;
+}
+
+void Buffer::printRecordVector() const
+{
+    for (const auto& record : recordVector) {
+        std::cout<<record.recordToString()<<std::endl;
+    }
+}
+std::vector<Record> Buffer::readRecordsFromFile(const std::string& filename)
+{
+    return std::vector<Record>();
+}
+bool Buffer::getIsSorted()
+{
+    return isSorted;
+}
+void Buffer::setIsSorted(bool isSorted)
+{
+    this->isSorted = isSorted;
+}
+char* Buffer::getBufferTable() {
+    return buffer;
+}
+void Buffer::emptyBuffer() {
+    std::memset(buffer, 0, BUFFER_SIZE);
+    this->recordVector.clear();
+}

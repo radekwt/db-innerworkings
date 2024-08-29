@@ -1,0 +1,651 @@
+#include "Tape.h"
+
+Tape::Tape(std::string filePath) : filePath(filePath)
+{
+    buffer = new Buffer();
+}
+Buffer* Tape::getBuffer()
+{
+    return this->buffer;
+}
+
+void Tape::resetTape()
+{
+    this->buffer->lastAvg = -1.0;
+    this->placeInFile = 0;
+    buffer->emptyBuffer();
+}
+bool Tape::isFileEmpty() {
+    std::ifstream file(filePath, std::ios::in | std::ios::binary);
+
+    if (!file.is_open()) {
+        std::cerr << "Error opening the file isFileEmpty: " << filePath << std::endl;
+        return true; // Consider file as empty if unable to open
+    }
+
+    file.seekg(0, std::ios::end); // Move file pointer to the end
+    if (file.tellg() == 0) { // Check if the file pointer is at the beginning (file is empty)
+        file.close();
+        return true; // File is empty
+    }
+
+    file.close();
+    return false; // File is not empty
+}
+
+
+int Tape::fromOneToTwo(Tape* tape1, Tape* tape2) {
+    std::ifstream file(this->filePath, std::ios::in | std::ios::binary);
+    std::ofstream outputFile1(tape1->filePath, std::ios::out | std::ios::binary);
+    std::ofstream outputFile2(tape2->filePath, std::ios::out | std::ios::binary);
+    if (!file.is_open() || !outputFile1.is_open() || !outputFile2.is_open()) {
+        std::cerr << "Failed to open the file." << std::endl;
+        return -1;
+    }
+    this->resetTape();
+    std::vector<Record> recordVector1;
+    std::vector<Record> recordVector2;
+    int chunkSize = BUFFER_SIZE;
+    file.seekg(0, std::ios::end);
+    std::streampos fileSize = file.tellg();
+    int intFileSize = static_cast<int>(fileSize);
+    file.seekg(0, std::ios::beg);
+    bool tape1Turn = true;
+    while (true) {
+        this->buffer->emptyBuffer();
+        if (intFileSize - this->placeInFile < chunkSize) {
+            chunkSize = intFileSize - this->placeInFile;
+        }
+        file.seekg(this->placeInFile, std::ios::beg);
+        file.read(this->buffer->getBufferTable(), chunkSize);
+        this->placeInFile += this->buffer->readRecordsFormated();
+        while (!this->buffer->getRecordVector().empty()) {
+            if (tape1Turn) {
+                this->buffer->recordListToFile(recordVector1);
+                if (recordVector1.size() == int(BUFFER_SIZE / RECORD_SIZE_IN_FILE)) {
+                    tape1->buffer->saveRecordsFormated(recordVector1);
+                    outputFile1 << tape1->buffer->getBufferTable();
+                    recordVector1.clear();
+                }
+                if (this->buffer->lastAvg==-1) {
+                    tape1Turn = false;
+                }
+            }
+            else {
+                this->buffer->recordListToFile(recordVector2);
+                if (recordVector2.size() == int(BUFFER_SIZE / RECORD_SIZE_IN_FILE)) {
+                    tape2->buffer->saveRecordsFormated(recordVector2);
+                    outputFile2 << tape2->buffer->getBufferTable();
+                    recordVector2.clear();
+                }
+                if (this->buffer->lastAvg == -1) {
+                    tape1Turn = true;
+                }
+            }
+        }
+        if (this->placeInFile >= fileSize || file.tellg() == -1) {
+            if (!recordVector1.empty()) {
+                tape1->buffer->saveRecordsFormated(recordVector1);
+                outputFile1 << tape1->buffer->getBufferTable();
+                recordVector1.clear();
+            }
+            if (!recordVector2.empty()) {
+                tape2->buffer->saveRecordsFormated(recordVector2);
+                outputFile2 << tape2->buffer->getBufferTable();
+                recordVector2.clear();
+            }
+            break;
+        }
+    }
+    file.close();
+    outputFile1.close();
+    outputFile2.close();
+    return 1;
+}
+int Tape::fromTwoToOne(Tape* tape1, Tape* tape2) {
+    std::ofstream file(this->filePath, std::ios::out | std::ios::binary);
+    std::ifstream tape1File(tape1->filePath, std::ios::in | std::ios::binary);
+    std::ifstream tape2File(tape2->filePath, std::ios::in | std::ios::binary);
+
+    if (!file.is_open() ) {
+        std::cerr << "Failed to open the file. 3" << std::endl;
+        return -1;
+    }
+    if ( !tape1File.is_open()) {
+        std::cerr << "Failed to open the file. 1" << std::endl;
+        return -1;
+    }
+    if ( !tape2File.is_open()) {
+        std::cerr << "Failed to open the file. 2" << std::endl;
+        return -1;
+    }
+    tape1->resetTape();
+    tape2->resetTape();
+
+    std::vector<Record> recordVector;
+    int tape1FileChunkSize = BUFFER_SIZE;
+    tape1File.seekg(0, std::ios::end);
+    std::streampos tape1FileSize = tape1File.tellg();
+    int inttape1FileSize = static_cast<int>(tape1FileSize);
+    tape1File.seekg(0, std::ios::beg);
+
+    int tape2FileChunkSize = BUFFER_SIZE;
+    tape2File.seekg(0, std::ios::end);
+    std::streampos tape2FileSize = tape2File.tellg();
+    int inttape2FileSize = static_cast<int>(tape2FileSize);
+    tape2File.seekg(0, std::ios::beg);
+
+    bool isFinishedTape1 = false;
+    bool isFinishedTape2 = false;
+    bool tape1Turn = true;
+    tape1->buffer->emptyBuffer();
+    tape2->buffer->emptyBuffer();
+    tape1->buffer->printRecordVector();
+    tape2->buffer->printRecordVector();
+    while (1) {
+        if (tape1->buffer->getRecordVector().empty()) {
+            tape1->buffer->emptyBuffer();
+            if (inttape1FileSize - tape1->placeInFile < tape1FileChunkSize) {
+                tape1FileChunkSize = inttape1FileSize - tape1->placeInFile;
+            }
+            tape1File.seekg(tape1->placeInFile, std::ios::beg);
+            tape1File.read(tape1->buffer->getBufferTable(), tape1FileChunkSize);
+            tape1->placeInFile += tape1->buffer->readRecordsFormated();
+        }
+        if (tape2->buffer->getRecordVector().empty()) {
+            tape2->buffer->emptyBuffer();
+            if (inttape2FileSize - tape2->placeInFile < tape2FileChunkSize) {
+                tape2FileChunkSize = inttape2FileSize - tape2->placeInFile;
+            }
+            tape2File.seekg(tape2->placeInFile, std::ios::beg);
+            tape2File.read(tape2->buffer->getBufferTable(), tape2FileChunkSize);
+            tape2->placeInFile += tape2->buffer->readRecordsFormated();
+        }
+        while (!tape1->buffer->getRecordVector().empty() && !tape2->buffer->getRecordVector().empty()) {
+            this->buffer->recordListToFile(recordVector,tape1->buffer, tape2->buffer);
+            if (recordVector.size() == int(BUFFER_SIZE / RECORD_SIZE_IN_FILE)) {
+                this->buffer->saveRecordsFormated(recordVector);
+                file << this->buffer->getBufferTable();
+                recordVector.clear();
+            }
+        }
+
+        if (tape1->placeInFile >= inttape1FileSize  || tape1File.tellg() == -1) {
+            isFinishedTape1 = true;
+            tape2->buffer->recordListToFile2(recordVector);
+            if (recordVector.size() == int(BUFFER_SIZE / RECORD_SIZE_IN_FILE)) {
+                this->buffer->saveRecordsFormated(recordVector);
+                file << this->buffer->getBufferTable();
+                recordVector.clear();
+            }
+            else if (tape2->placeInFile >= inttape2FileSize) {
+                this->buffer->saveRecordsFormated(recordVector);
+                file << this->buffer->getBufferTable();
+                recordVector.clear();
+                if (tape1->buffer->getRecordVector().empty() && tape2->buffer->getRecordVector().empty()) {
+                    break;
+                }
+            }
+        }
+        if (tape2->placeInFile >= inttape2FileSize || tape2File.tellg() == -1) {
+            isFinishedTape2 = true;
+            tape1->buffer->recordListToFile2(recordVector);
+            if (recordVector.size() == int(BUFFER_SIZE / RECORD_SIZE_IN_FILE)) {
+                this->buffer->saveRecordsFormated(recordVector);
+                file << this->buffer->getBufferTable();
+                recordVector.clear();
+            }
+            else if (tape1->placeInFile >= inttape1FileSize) {
+                this->buffer->saveRecordsFormated(recordVector);
+                file << this->buffer->getBufferTable();
+                recordVector.clear();
+                if (tape1->buffer->getRecordVector().empty() && tape2->buffer->getRecordVector().empty()) {
+                    break;
+                }
+            }
+        }
+    }
+    //std::cout << "0: " << recordVector.size() << std::endl;
+    //std::cout << "1: " << tape1->buffer->getRecordVector().size() << std::endl;
+    //std::cout << "2: " << tape2->buffer->getRecordVector().size() << std::endl;
+    //tape1File.seekg(0, std::ios::end);
+    //tape2File.seekg(0, std::ios::end);
+    if (tape1->placeInFile == 0 || tape2->placeInFile == 0) {
+        return 2;
+    }
+    file.close();
+    tape1File.close();
+    tape2File.close();
+    return 1;
+}
+
+void Tape::printTape()
+{
+    this->resetTape();
+    std::ifstream file(filePath, std::ios::in | std::ios::binary);
+
+    if (!file.is_open()) {
+        std::cerr << "Failed to open the file." << std::endl;
+        return;
+    }
+
+    int chunkSize = BUFFER_SIZE;
+    file.seekg(0, std::ios::end);
+    std::streampos fileSize = file.tellg();
+    int intFileSize = static_cast<int>(fileSize);
+    file.seekg(0, std::ios::beg);
+
+    while (true) {
+        this->buffer->emptyBuffer();
+        if (intFileSize - placeInFile < chunkSize) {
+            chunkSize = intFileSize - placeInFile;
+        }
+        file.seekg(placeInFile, std::ios::beg);
+        file.read(this->buffer->getBufferTable(), chunkSize);
+        //this->buffer->printBuffer();
+        placeInFile += this->buffer->readRecordsFormated();
+        this->buffer->printRecordVector();
+        if (placeInFile >= fileSize || file.tellg() == -1) {
+            break;
+        }
+
+    }
+    file.close();
+    return;
+}
+void Tape::fillTapeRandom(int amount)
+{
+    std::ofstream outputFile(this->filePath, std::ios::out | std::ios::binary);
+    int index = 0;
+    std::vector<Record> recordVector;
+    if (outputFile.is_open()) {
+        while (index<amount) {
+            for (int i = 0; i < (BUFFER_SIZE / RECORD_SIZE_IN_FILE); i++) {
+                if (index >= amount) {
+                    break;
+                }
+                std::random_device rd;
+                std::mt19937 generator(rd());
+                std::uniform_int_distribution<int> gradeDistribution(0, 100);
+                int studentId = index;
+                short int grade1 = gradeDistribution(generator);
+                short int grade2 = gradeDistribution(generator);
+                short int grade3 = gradeDistribution(generator);
+                Record record(studentId + 1, grade1, grade2, grade3);
+                recordVector.push_back(record);
+                index++;
+            }
+            this->buffer->saveRecordsFormated(recordVector);
+            outputFile << this->buffer->getBufferTable();
+            recordVector.clear();
+        }
+        outputFile.close();
+    }
+    else {
+        std::cerr << "Failed to open " << this->filePath << " for writing." << std::endl;
+    }
+}
+void Tape::fillTapeSorted(int amount)
+{
+    std::ofstream outputFile(this->filePath, std::ios::out | std::ios::binary);
+    int index = 0;
+    std::vector<Record> recordVector;
+    if (outputFile.is_open()) {
+        while (index<amount) {
+            for (int i = 0; i < (BUFFER_SIZE / RECORD_SIZE_IN_FILE); i++) {
+                if (index >= amount) {
+                    break;
+                }
+                std::random_device rd;
+                std::mt19937 generator(rd());
+                std::uniform_int_distribution<int> gradeDistribution(0, 100);
+                int studentId = index;
+                short int grade1 = index;
+                short int grade2 = index;
+                short int grade3 = index;
+                Record record(studentId + 1, grade1, grade2, grade3);
+                recordVector.push_back(record);
+                index++;
+            }
+            this->buffer->saveRecordsFormated(recordVector);
+            outputFile << this->buffer->getBufferTable();
+            recordVector.clear();
+        }
+        outputFile.close();
+        std::cout << "Records written to " << this->filePath << std::endl;
+    }
+    else {
+        std::cerr << "Failed to open " << this->filePath << " for writing." << std::endl;
+    }
+}
+#include "Buffer.h"
+#include <iostream>
+#include <sstream>
+
+Buffer::Buffer()
+{
+}
+
+void Buffer::nullTerminateTheBuffer(int index)
+{
+    buffer[index] = '\0';
+}
+void Buffer::fillBuffer(char content[],int size)
+{
+    for (int i = 0; i < BUFFER_SIZE; i++) {
+        this->buffer[i] = content[i];
+    }
+}
+void Buffer::recordListToFile2(std::string filename)
+{
+    std::ofstream outputFile(filename, std::ios::app);
+    if (outputFile.is_open()) {
+        auto iter = recordVector.begin(); // Iterator for removing elements
+
+        while (iter != recordVector.end()) {
+            const Record& record = *iter;
+            outputFile << record.recordToFileString();
+            iter = recordVector.erase(iter); // Erase the written record from vector
+        }
+        outputFile.close();
+    }
+    else {
+        std::cerr << "Failed to open " << filename << " for writing." << std::endl;
+    }
+}
+std::vector<Record> Buffer::recordListToFile2() {
+    std::vector<Record> resultRecords; // Vector to store records
+
+    auto iter = recordVector.begin();
+
+    while (iter != recordVector.end() && resultRecords.size() < maxNumOfRecordsInBuffer) {
+        const Record& record = *iter;
+        resultRecords.push_back(record); // Add record to the result vector
+        iter = recordVector.erase(iter); // Erase the record from the original vector
+    }
+
+    return resultRecords; // Return the vector containing records
+}
+void Buffer::recordListToFile2(std::vector<Record>& resultRecords) { // Vector to store records
+
+    auto iter = recordVector.begin();
+
+    while (iter != recordVector.end() && resultRecords.size() < maxNumOfRecordsInBuffer) {
+        const Record& record = *iter;
+        resultRecords.push_back(record); // Add record to the result vector
+        iter = recordVector.erase(iter); // Erase the record from the original vector
+    }
+ // Return the vector containing records
+}
+std::vector<Record> Buffer::recordListToFile()
+{
+    auto iter = recordVector.begin(); // Iterator for removing elements
+    std::vector<Record> resultRecords;
+    while (iter != recordVector.end() && resultRecords.size() < maxNumOfRecordsInBuffer) {
+        const Record& record = *iter;
+        if (this->lastAvg > record.getGradeAvg()) {
+            this->lastAvg = -1.0;
+            break;
+        }
+        resultRecords.push_back(record); // Add the record to the new vector
+        this->lastAvg = record.getGradeAvg();
+        iter = recordVector.erase(iter); // Erase the record from the original vector
+    }
+    return resultRecords;
+}
+void Buffer::recordListToFile(std::vector<Record>& resultRecords)
+{
+    auto iter = recordVector.begin(); // Iterator for removing elements
+    while (iter != recordVector.end() && resultRecords.size() < maxNumOfRecordsInBuffer) {
+        const Record& record = *iter;
+        if (this->lastAvg > record.getGradeAvg()) {
+            this->lastAvg = -1.0;
+            break;
+        }
+        resultRecords.push_back(record); // Add the record to the new vector
+        this->lastAvg = record.getGradeAvg();
+        iter = recordVector.erase(iter); // Erase the record from the original vector
+    }
+}
+bool Buffer::checkIfSorted() {
+    auto iter = recordVector.begin();
+    while (iter != recordVector.end()) {
+        const Record& record = *iter;
+        if (this->lastAvg > record.getGradeAvg()) {
+            return false;
+        }
+        this->lastAvg = record.getGradeAvg();
+        ++iter;
+    }
+    return true;
+}
+std::vector<Record> Buffer::recordListToFile(Buffer* buffer1, Buffer* buffer2) {
+    std::vector<Record> resultRecords; // Vector to store qualifying records
+
+    auto iterTape1 = buffer1->recordVector.begin();
+    auto iterTape2 = buffer2->recordVector.begin();
+
+    while (iterTape1 != buffer1->recordVector.end() && iterTape2 != buffer2->recordVector.end() && resultRecords.size() < maxNumOfRecordsInBuffer) {
+        const Record& recordTape1 = *iterTape1;
+        const Record& recordTape2 = *iterTape2;
+
+        if (recordTape1.getGradeAvg() < recordTape2.getGradeAvg() && buffer1->lastAvg <= recordTape1.getGradeAvg()) {
+            resultRecords.push_back(recordTape1); // Add record to the result vector
+            buffer1->lastAvg = recordTape1.getGradeAvg();
+            iterTape1 = buffer1->recordVector.erase(iterTape1);
+            buffer2->lastAvg = -1;
+        }
+        else {
+            resultRecords.push_back(recordTape2); // Add record to the result vector
+            buffer2->lastAvg = recordTape2.getGradeAvg();
+            iterTape2 = buffer2->recordVector.erase(iterTape2);
+            buffer1->lastAvg = -1;
+        }
+    }
+
+    return resultRecords; // Return the vector containing qualifying records
+}
+void Buffer::recordListToFile(std::vector<Record> &resultRecords, Buffer* buffer1, Buffer* buffer2) {
+ // Vector to store qualifying records
+
+    auto iterTape1 = buffer1->recordVector.begin();
+    auto iterTape2 = buffer2->recordVector.begin();
+
+    while (iterTape1 != buffer1->recordVector.end() && iterTape2 != buffer2->recordVector.end() && resultRecords.size() < maxNumOfRecordsInBuffer) {
+        const Record& recordTape1 = *iterTape1;
+        const Record& recordTape2 = *iterTape2;
+        if (buffer1->lastAvg > recordTape1.getGradeAvg() && buffer2->lastAvg > recordTape2.getGradeAvg()) {
+            buffer1->lastAvg = -1.0;
+            buffer2->lastAvg = -1.0;
+        }
+        if (recordTape1.getGradeAvg() < recordTape2.getGradeAvg() && buffer1->lastAvg<=recordTape1.getGradeAvg() || buffer2->lastAvg > recordTape2.getGradeAvg()) {
+            if (buffer1->lastAvg > recordTape1.getGradeAvg()) {
+                buffer2->lastAvg = -1.0;
+            }
+            resultRecords.push_back(recordTape1); // Add record to the result vector
+            buffer1->lastAvg = recordTape1.getGradeAvg();
+            iterTape1 = buffer1->recordVector.erase(iterTape1);
+        }
+        else {
+            if (buffer2->lastAvg > recordTape2.getGradeAvg()) {
+                buffer1->lastAvg = -1.0;
+            }
+            resultRecords.push_back(recordTape2); // Add record to the result vector
+            buffer2->lastAvg = recordTape2.getGradeAvg();
+            iterTape2 = buffer2->recordVector.erase(iterTape2);
+        }
+    }
+ // Return the vector containing qualifying records
+}
+void Buffer::recordListToFile(std::string filename,Buffer* buffer1,Buffer* buffer2)
+{
+    std::ofstream outputFile(filename, std::ios::app);
+
+    if (outputFile.is_open()) {
+        auto iterTape1 = buffer1->recordVector.begin(); // Iterator for removing elements
+        auto iterTape2 = buffer2->recordVector.begin(); // Iterator for removing elements
+
+        while (iterTape1 != buffer1->recordVector.end() && iterTape2 != buffer2->recordVector.end()) {
+            const Record& recordTape1 = *iterTape1;
+            const Record& recordTape2 = *iterTape2;
+            if (recordTape1.getGradeAvg() < recordTape2.getGradeAvg() && buffer1->lastAvg <= recordTape1.getGradeAvg()) {
+                outputFile << recordTape1.recordToFileString();
+                buffer1->lastAvg = recordTape1.getGradeAvg();
+                iterTape1 = buffer1->recordVector.erase(iterTape1);
+                buffer2->lastAvg = -1;
+            }
+            else {
+                outputFile << recordTape2.recordToFileString();
+                buffer2->lastAvg = recordTape2.getGradeAvg();
+                iterTape2 = buffer2->recordVector.erase(iterTape2);
+                buffer1->lastAvg = -1;
+            }
+        }
+
+        outputFile.close();
+    }
+    else {
+        std::cerr << "Failed to open " << filename << " for writing." << std::endl;
+    }
+}
+
+
+
+
+int Buffer::readRecords() {
+    this->recordVector.clear();
+    this->printBuffer();
+    std::istringstream bufferStream(buffer);
+    std::string recordString;
+    int currentEndRecCharIndex = -1;  
+    int position = 0;
+    int recNum = 0;
+    for (int i = 0; buffer[i] != '\0'; i++) {
+        if (buffer[i] == endRecChar) {
+            position = i;
+            recNum += 1;
+        }
+    }
+    std::getline(bufferStream, recordString, endRecChar);
+    for (int i = 0; i < recNum; i++) {
+        std::istringstream recordStream(recordString);
+        int studentId;
+        short int grade1, grade2, grade3;
+
+        if (recordStream >> studentId >> grade1 >> grade2 >> grade3) {
+            Record record(studentId, grade1, grade2, grade3); 
+            recordVector.push_back(record);
+
+        }
+    }
+    lastEndRecCharIndex = position;
+    std::cout << lastEndRecCharIndex<<std::endl;
+    return lastEndRecCharIndex;
+}
+
+std::streampos Buffer::readRecordsFormated() {
+    this->recordVector.clear();
+    this->readTimes++;
+
+    constexpr size_t recordSize = RECORD_SIZE_IN_FILE; // Size of each record
+
+    const char* bufferPtr = buffer; // Pointer to the buffer data
+
+    for (size_t i = 0; i < BUFFER_SIZE; i += recordSize) {
+        char recordBuffer[recordSize]; // Buffer to hold individual records
+
+        // Read a chunk of data representing a single record
+        memcpy(recordBuffer, bufferPtr, recordSize);
+        bufferPtr += recordSize;
+        // Remove the 0D 0A characters at the end of each record
+        size_t recordEnd = recordSize;
+        if (recordEnd >= 1 && recordBuffer[recordEnd - 1] == '\x0A') {
+            recordBuffer[recordEnd - 1] = '\0';
+        }
+
+        // Ensure the record buffer has the expected length before parsing
+        int studentId;
+        short int grade1, grade2, grade3;
+
+        // Parse each record buffer
+        if (sscanf(recordBuffer, "%10d%3hd%3hd%3hd", &studentId, &grade1, &grade2, &grade3) == 4) {
+            Record record(studentId, grade1, grade2, grade3);
+            this->recordVector.push_back(record);
+        }
+        else {
+            break; // Break if unable to parse a record
+        }
+
+    }
+
+    // Calculate and return the total bytes read
+    return static_cast<std::streampos>(recordVector.size()) * recordSize;
+}
+void Buffer::saveRecordsFormated(std::vector<Record> recordVector) {
+    this->emptyBuffer();
+    std::string recordString;
+    int index = 0;
+    this->saveTimes++;
+    for (const auto& record : recordVector) {
+        recordString += record.recordToFileString();
+    }
+    
+
+    const char* recordCString = recordString.c_str(); // Get the C-style string from std::string
+
+    // Assuming you have a char array to store the string// Define a char array to store the string
+    strncpy(this->buffer, recordCString, BUFFER_SIZE);
+    return;
+}
+
+std::string Buffer::recordListToString() const{
+    std::string result;
+
+    for (const auto& record : recordVector) {
+        result += record.recordToFileString() + '\n';
+    }
+
+    return result;
+}
+
+void Buffer::printBuffer() const
+{
+    for (int i = 0; i < BUFFER_SIZE; i++) {
+        std::cout << this->buffer[i];
+    }
+    std::cout << std::endl;
+}
+
+// Add getter for the recordList if needed
+std::vector<Record> Buffer::getRecordVector() const {
+    return this->recordVector;
+}
+
+void Buffer::printRecordVector() const
+{
+    for (const auto& record : recordVector) {
+        std::cout<<record.recordToString()<<std::endl;
+    }
+}
+std::vector<Record> Buffer::readRecordsFromFile(const std::string& filename)
+{
+    return std::vector<Record>();
+}
+bool Buffer::getIsSorted()
+{
+    return isSorted;
+}
+void Buffer::setIsSorted(bool isSorted)
+{
+    this->isSorted = isSorted;
+}
+char* Buffer::getBufferTable() {
+    return buffer;
+}
+void Buffer::emptyBuffer() {
+    std::memset(buffer, 0, BUFFER_SIZE);
+    this->recordVector.clear();
+}
+void printSaveReadTimes() {
+  
+}
